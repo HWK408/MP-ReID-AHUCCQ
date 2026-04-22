@@ -19,3 +19,5 @@ data/
 *.avi
 *.h5
 *.pkl
+
+AGENTS.md
