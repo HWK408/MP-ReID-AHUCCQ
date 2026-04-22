@@ -14,14 +14,16 @@ def do_train_stage1(cfg,
              optimizer,
              scheduler,
              local_rank,
+             stage_name,
              is_stage1b=False):
-    checkpoint_period = cfg.SOLVER.STAGE1.CHECKPOINT_PERIOD
+    stage_cfg = getattr(cfg.SOLVER, stage_name)
+    checkpoint_period = stage_cfg.CHECKPOINT_PERIOD
     device = "cuda"
-    epochs = cfg.SOLVER.STAGE1.MAX_EPOCHS
-    log_period = cfg.SOLVER.STAGE1.LOG_PERIOD 
+    epochs = stage_cfg.MAX_EPOCHS
+    log_period = stage_cfg.LOG_PERIOD 
 
     logger = logging.getLogger("transreid.train")
-    logger.info(f"Start training stage {'1b' if is_stage1b else '1a'}")
+    logger.info(f"Start training stage {'1b' if is_stage1b else '1a'} with config {stage_name}")
 
     _LOCAL_PROCESS_GROUP = None
     if device:
@@ -58,9 +60,9 @@ def do_train_stage1(cfg,
         views_list = torch.stack(views, dim=0).cuda() # <-- Create tensor of views
         image_features_list = torch.stack(image_features, dim=0).cuda()
 
-        batch = cfg.SOLVER.STAGE1.IMS_PER_BATCH
+        batch = stage_cfg.IMS_PER_BATCH
         num_image = labels_list.shape[0]
-        i_ter = num_image // batch
+        i_ter = (num_image + batch - 1) // batch
     del labels, image_features, views
 
     for epoch in range(1, epochs + 1):
@@ -70,12 +72,9 @@ def do_train_stage1(cfg,
         model.train()
 
         iter_list = torch.randperm(num_image).to(device)
-        for i in range(i_ter+1):
+        for i in range(i_ter):
             optimizer.zero_grad()
-            if i != i_ter:
-                b_list = iter_list[i*batch:(i+1)* batch]
-            else:
-                b_list = iter_list[i*batch:num_image]
+            b_list = iter_list[i * batch:min((i + 1) * batch, num_image)]
             
             target = labels_list[b_list]
             target_view_batch = views_list[b_list]
@@ -83,9 +82,9 @@ def do_train_stage1(cfg,
 
             with torch.cuda.amp.autocast(enabled=True):
                 if is_stage1b:
-                    text_features = model(label=target, get_text=True, view=target_view_batch)
+                    text_features = model(label=target, get_text=True, view=target_view_batch, image_feature=image_features)
                 else:
-                    text_features = model(label=target, get_text=True, view=None)
+                    text_features = model(label=target, get_text=True, view=None, image_feature=image_features)
 
             loss_i2t = xent(image_features, text_features, target, target)
             loss_t2i = xent(text_features, image_features, target, target)

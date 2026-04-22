@@ -50,11 +50,12 @@ def val_collate_fn(batch):
     return torch.stack(imgs, dim=0), pids, camids, camids_batch, viewids, img_paths
 
 def make_dataloader(cfg):
+    # 数据增强
     train_transforms = T.Compose([
-            T.Resize(cfg.INPUT.SIZE_TRAIN, interpolation=3),
-            T.RandomHorizontalFlip(p=cfg.INPUT.PROB),
-            T.Pad(cfg.INPUT.PADDING),
-            T.RandomCrop(cfg.INPUT.SIZE_TRAIN),
+            T.Resize(cfg.INPUT.SIZE_TRAIN, interpolation=3),# 调整图片大小。 [256, 128]
+            T.RandomHorizontalFlip(p=cfg.INPUT.PROB),# 随机水平翻转。 0.5 的概率进行翻转
+            T.Pad(cfg.INPUT.PADDING),# 
+            T.RandomCrop(cfg.INPUT.SIZE_TRAIN),#这两个通常是组合拳，用来实现随机平移
             T.ToTensor(),
             T.Normalize(mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD),
             RandomErasing(probability=cfg.INPUT.RE_PROB, mode='pixel', max_count=1, device='cpu'),
@@ -67,9 +68,9 @@ def make_dataloader(cfg):
         T.Normalize(mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD)
     ])
 
-    num_workers = cfg.DATALOADER.NUM_WORKERS
+    num_workers = cfg.DATALOADER.NUM_WORKERS #8
 
-    dataset = __factory[cfg.DATASETS.NAMES](root=cfg.DATASETS.ROOT_DIR,exp_setting = cfg.DATASETS.EXP_SETTING)
+    dataset = __factory[cfg.DATASETS.NAMES](root=cfg.DATASETS.ROOT_DIR,exp_setting = cfg.DATASETS.EXP_SETTING)# names：mmmp
     
     train_set = ImageDataset(dataset.train, train_transforms)
     train_set_normal = ImageDataset(dataset.train, val_transforms)

@@ -8,12 +8,12 @@ from collections import defaultdict
 import pickle
 import random
 class MMMP(BaseImageDataset):
-    dataset_dir = '/data/mmmp1_10'
+    dataset_dir = '/data0/hewenke/mp-reid'
 
     def __init__(self,root = '' , verbose = True, pid_begin = 0,exp_setting = None, **kwargs):
         super(MMMP,self).__init__()
         # self.cfg = cfg
-        self.exp_setting = exp_setting
+        self.exp_setting = exp_setting #
         self.setting_name_split = exp_setting.split("_")
         self.file_path_train = osp.join(self.dataset_dir,self.exp_setting,'train_id.txt')
         self.file_path_val   = osp.join(self.dataset_dir,self.exp_setting,'val_id.txt')
@@ -58,41 +58,50 @@ class MMMP(BaseImageDataset):
             camid -= 1  # index starts from 0
             if relabel: pid = pid2label[pid]
 
-            dataset.append((img_path, self.pid_begin + pid, camid, 0))
+            dataset.append((img_path, self.pid_begin + pid, camid, camid))
         return dataset
     
 
-    def _process_train(self, dir_path,file_path_train,file_path_val,exp_setting = None, relabel=True):
-        
+    def _process_train(self, dir_path, file_path_train, file_path_val, exp_setting=None, relabel=True):
+        """
+        1. 读 train ID 文件
+        2. 读 val ID 文件
+        3. 把 ID 统一格式化成 '0001' 这种形式
+        4. 根据 exp_setting 决定要用哪些 camera
+        5. 遍历所有 pid 和 camera,对应目录里找图片
+        6. 保存成 samples = [(img_path, pid, camid), ...]
+        7. 把原始 pid 重映射成连续标签
+        8. 生成 dataset = [(img_path, pid, camid, viewid), ...] 并返回
+        """
         with open(file_path_train, 'r') as file:
             ids = file.read().splitlines()
             ids = [int(y) for y in ids[0].split(',')]
             id_train = ["%04d" % x for x in ids]
-            
+
         with open(file_path_val, 'r') as file:
             ids = file.read().splitlines()
             ids = [int(y) for y in ids[0].split(',')]
-            id_val = ["%04d" % x for x in ids]  
-
+            id_val = ["%04d" % x for x in ids]
 
         setting_name_split = exp_setting.split("_")
         train_cameras = []
         if len(setting_name_split) == 5:
             if setting_name_split[1] == 'cctv':
                 if setting_name_split[2] == 'ir':
-                    train_cameras += ['07','08','09','10','11','12']
+                    train_cameras += ['07', '08', '09', '10', '11', '12']
                 elif setting_name_split[2] == 'rgb':
-                    train_cameras += ['01','02','03','04','05','06']
+                    train_cameras += ['01', '02', '03', '04', '05', '06']
             elif setting_name_split[1] == 'uav':
                 if setting_name_split[2] == 'ir':
                     train_cameras += ['14']
                 elif setting_name_split[2] == 'rgb':
                     train_cameras += ['13']
+
             if setting_name_split[3] == 'cctv':
                 if setting_name_split[4] == 'ir':
-                    train_cameras += ['07','08','09','10','11','12']
+                    train_cameras += ['07', '08', '09', '10', '11', '12']
                 elif setting_name_split[4] == 'rgb':
-                    train_cameras += ['01','02','03','04','05','06']
+                    train_cameras += ['01', '02', '03', '04', '05', '06']
             elif setting_name_split[3] == 'uav':
                 if setting_name_split[4] == 'ir':
                     train_cameras += ['14']
@@ -100,118 +109,124 @@ class MMMP(BaseImageDataset):
                     train_cameras += ['13']
         elif len(setting_name_split) == 2:
             if setting_name_split[1] == 'cctv':
-                train_cameras += ['01','02','03','04','05','06','07','08','09','10','11','12']
+                train_cameras += ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
             elif setting_name_split[1] == 'uav':
-                train_cameras += ['13','14']
+                train_cameras += ['13', '14']
             elif setting_name_split[1] == 'ir':
-                train_cameras += ['07','08','09','10','11','12','14']
+                train_cameras += ['07', '08', '09', '10', '11', '12', '14']
             elif setting_name_split[1] == 'rgb':
-                train_cameras += ['01','02','03','04','05','06','13']
+                train_cameras += ['01', '02', '03', '04', '05', '06', '13']
         else:
             print("!!!setting name error!!!!")
-        files = []
-        id_train.extend(id_val)
-        for id in sorted(id_train):
-            for cam in train_cameras:
-                img_dir = osp.join(dir_path,cam,id)
-                if osp.isdir(img_dir):
-                    new_files = sorted([img_dir+'/'+i for i in os.listdir(img_dir)])
-                    files.extend(new_files)      
-        pid_container = set()
-        for img_path in files:
-            pid = int(img_path[-13:-9])
-            pid_container.add(pid)
-        pid2label = {pid:label for label, pid in enumerate(pid_container)}
-       
-        dataset = []
-        for img_path in files:
-            camid, pid = int(img_path[-15]), int(img_path[-13:-9])
-            
-            if relabel: pid = pid2label[pid]
 
-            dataset.append((img_path, self.pid_begin + pid, camid, 0))
+        samples = []
+        id_train.extend(id_val)
+
+        for pid_str in sorted(id_train):
+            for cam_str in train_cameras:
+                img_dir = osp.join(dir_path, cam_str, pid_str)
+                if osp.isdir(img_dir):
+                    for fname in sorted(os.listdir(img_dir)):
+                        img_path = osp.join(img_dir, fname)
+                        if osp.isfile(img_path):
+                            samples.append((img_path, int(pid_str), int(cam_str)))
+
+        pid_container = set(pid for _, pid, _ in samples)
+        pid2label = {pid: label for label, pid in enumerate(sorted(pid_container))}
+
+        dataset = []
+        for img_path, pid, camid in samples:
+            if relabel:
+                pid = pid2label[pid]
+            viewid = camid -1
+            dataset.append((img_path, self.pid_begin + pid, camid, viewid))
+
         return dataset
     
-    def _process_query(self, dir_path,file_path, exp_setting = None,relabel=False):
-        
+    def _process_query(self, dir_path, file_path, exp_setting=None, relabel=False):
         with open(file_path, 'r') as file:
             ids = file.read().splitlines()
             ids = [int(y) for y in ids[0].split(',')]
-            ids = ["%04d" % x for x in ids] 
-
+            ids = ["%04d" % x for x in ids]
 
         setting_name_split = exp_setting.split("_")
         if setting_name_split[1] == 'cctv' and setting_name_split[2] == 'ir':
-            query_cameras = ['07','08','09','10','11','12']
+            query_cameras = ['07', '08', '09', '10', '11', '12']
         elif setting_name_split[1] == 'cctv' and setting_name_split[2] == 'rgb':
-            query_cameras = ['01','02','03','04','05','06']
+            query_cameras = ['01', '02', '03', '04', '05', '06']
         elif setting_name_split[1] == 'uav' and setting_name_split[2] == 'ir':
             query_cameras = ['14']
         elif setting_name_split[1] == 'uav' and setting_name_split[2] == 'rgb':
             query_cameras = ['13']
         else:
             print("!!!setting name error!!!!")
-        files = []
-        for id in sorted(ids):
-            for cam in query_cameras:
-                img_dir = osp.join(dir_path,cam,id)
-                if osp.isdir(img_dir):
-                    new_files = sorted([img_dir+'/'+i for i in os.listdir(img_dir)])
-                    files.extend(new_files)      
-        pid_container = set()
-        for img_path in files:
-            pid = int(img_path[-13:-9])
-            pid_container.add(pid)
-        pid2label = {pid:label for label, pid in enumerate(pid_container)}
-       
-        dataset = []
-        for img_path in files:
-            camid, pid = int(img_path[-15]), int(img_path[-13:-9])
-            
-            if relabel: pid = pid2label[pid]
+            query_cameras = []
 
-            dataset.append((img_path, self.pid_begin + pid, camid, 0))
+        samples = []
+        for pid_str in sorted(ids):
+            for cam_str in query_cameras:
+                img_dir = osp.join(dir_path, cam_str, pid_str)
+                if osp.isdir(img_dir):
+                    for fname in sorted(os.listdir(img_dir)):
+                        if not fname.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
+                            continue
+                        img_path = osp.join(img_dir, fname)
+                        if osp.isfile(img_path):
+                            samples.append((img_path, int(pid_str), int(cam_str)))
+
+        pid_container = set(pid for _, pid, _ in samples)
+        pid2label = {pid: label for label, pid in enumerate(sorted(pid_container))}
+
+        dataset = []
+        for img_path, pid, camid in samples:
+            if relabel:
+                pid = pid2label[pid]
+            viewid = camid -1
+            dataset.append((img_path, self.pid_begin + pid, camid, viewid))
+
         return dataset
-    
-    def _process_gallery(self, dir_path,file_path,exp_setting = None, relabel=False):
-        
+
+    def _process_gallery(self, dir_path, file_path, exp_setting=None, relabel=False):
         with open(file_path, 'r') as file:
             ids = file.read().splitlines()
             ids = [int(y) for y in ids[0].split(',')]
-            ids = ["%04d" % x for x in ids] 
-
+            ids = ["%04d" % x for x in ids]
 
         setting_name_split = exp_setting.split("_")
         if setting_name_split[3] == 'cctv' and setting_name_split[4] == 'ir':
-            gallery_cameras = ['07','08','09','10','11','12']
+            gallery_cameras = ['07', '08', '09', '10', '11', '12']
         elif setting_name_split[3] == 'cctv' and setting_name_split[4] == 'rgb':
-            gallery_cameras = ['01','02','03','04','05','06']
+            gallery_cameras = ['01', '02', '03', '04', '05', '06']
         elif setting_name_split[3] == 'uav' and setting_name_split[4] == 'ir':
             gallery_cameras = ['14']
         elif setting_name_split[3] == 'uav' and setting_name_split[4] == 'rgb':
             gallery_cameras = ['13']
         else:
             print("!!!setting name error!!!!")
-        files = []
-        for id in sorted(ids):
-            for cam in gallery_cameras:
-                img_dir = osp.join(dir_path,cam,id)
-                if osp.isdir(img_dir):
-                    new_files = sorted([img_dir+'/'+i for i in os.listdir(img_dir)])
-                    files.extend(new_files)      
-        pid_container = set()
-        for img_path in files:
-            pid = int(img_path[-13:-9])
-            pid_container.add(pid)
-        pid2label = {pid:label for label, pid in enumerate(pid_container)}
-       
-        dataset = []
-        for img_path in files:
-            camid, pid = int(img_path[-15]), int(img_path[-13:-9])
-            
-            if relabel: pid = pid2label[pid]
+            gallery_cameras = []
 
-            dataset.append((img_path, self.pid_begin + pid, camid, 0))
+        samples = []
+        for pid_str in sorted(ids):
+            for cam_str in gallery_cameras:
+                img_dir = osp.join(dir_path, cam_str, pid_str)
+                if osp.isdir(img_dir):
+                    for fname in sorted(os.listdir(img_dir)):
+                        if not fname.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
+                            continue
+                        img_path = osp.join(img_dir, fname)
+                        if osp.isfile(img_path):
+                            samples.append((img_path, int(pid_str), int(cam_str)))
+
+        pid_container = set(pid for _, pid, _ in samples)
+        pid2label = {pid: label for label, pid in enumerate(sorted(pid_container))}
+
+        dataset = []
+        for img_path, pid, camid in samples:
+            if relabel:
+                pid = pid2label[pid]
+            viewid = camid -1
+            dataset.append((img_path, self.pid_begin + pid, camid, viewid))
+
         return dataset
     
     def _process_same(self, dir_path, file_path, exp_setting=None, relabel=False, split_ratio=0.5):
@@ -266,14 +281,16 @@ class MMMP(BaseImageDataset):
                     labeled_pid = pid2label[pid]
                 else:
                     labeled_pid = pid
-                query_files.append((img_path, self.pid_begin + labeled_pid, camid, 0))
+                viewid = camid - 1
+                query_files.append((img_path, self.pid_begin + labeled_pid, camid, viewid))
                 
             for img_path in random_files[split_point:]:
                 if relabel:
                     labeled_pid = pid2label[pid]
                 else:
                     labeled_pid = pid
-                gallery_files.append((img_path, self.pid_begin + labeled_pid, camid, 0))
+                viewid = camid - 1
+                gallery_files.append((img_path, self.pid_begin + labeled_pid, camid, viewid))
 
         # query_pids = set(pid for _, pid, _, _ in query_files)
         # gallery_pids = set(pid for _, pid, _, _ in gallery_files)
@@ -284,3 +301,167 @@ class MMMP(BaseImageDataset):
         # breakpoint()
         
         return query_files, gallery_files
+
+if __name__ == '__main__':
+    dataset = MMMP(exp_setting='exp_cctv_rgb_uav_rgb')
+    print(dataset.num_train_pids)
+    print(dataset.num_query_pids)
+    print(dataset.num_gallery_pids)
+    print(dataset.train[1])
+
+
+    #代码中原来处理训练集的代码
+    # def _process_train(self, dir_path, file_path_train, file_path_val, exp_setting=None, relabel=True):
+    # with open(file_path_train, 'r') as file:
+    #     ids = file.read().splitlines()
+    #     ids = [int(y) for y in ids[0].split(',')]
+    #     id_train = ["%04d" % x for x in ids]
+
+    # with open(file_path_val, 'r') as file:
+    #     ids = file.read().splitlines()
+    #     ids = [int(y) for y in ids[0].split(',')]
+    #     id_val = ["%04d" % x for x in ids]
+
+    # setting_name_split = exp_setting.split("_")
+    # train_cameras = []
+    # if len(setting_name_split) == 5:
+    #     if setting_name_split[1] == 'cctv':
+    #         if setting_name_split[2] == 'ir':
+    #             train_cameras += ['07', '08', '09', '10', '11', '12']
+    #         elif setting_name_split[2] == 'rgb':
+    #             train_cameras += ['01', '02', '03', '04', '05', '06']
+    #     elif setting_name_split[1] == 'uav':
+    #         if setting_name_split[2] == 'ir':
+    #             train_cameras += ['14']
+    #         elif setting_name_split[2] == 'rgb':
+    #             train_cameras += ['13']
+
+    #     if setting_name_split[3] == 'cctv':
+    #         if setting_name_split[4] == 'ir':
+    #             train_cameras += ['07', '08', '09', '10', '11', '12']
+    #         elif setting_name_split[4] == 'rgb':
+    #             train_cameras += ['01', '02', '03', '04', '05', '06']
+    #     elif setting_name_split[3] == 'uav':
+    #         if setting_name_split[4] == 'ir':
+    #             train_cameras += ['14']
+    #         elif setting_name_split[4] == 'rgb':
+    #             train_cameras += ['13']
+    # elif len(setting_name_split) == 2:
+    #     if setting_name_split[1] == 'cctv':
+    #         train_cameras += ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
+    #     elif setting_name_split[1] == 'uav':
+    #         train_cameras += ['13', '14']
+    #     elif setting_name_split[1] == 'ir':
+    #         train_cameras += ['07', '08', '09', '10', '11', '12', '14']
+    #     elif setting_name_split[1] == 'rgb':
+    #         train_cameras += ['01', '02', '03', '04', '05', '06', '13']
+    # else:
+    #     print("!!!setting name error!!!!")
+
+    # samples = []
+    # id_train.extend(id_val)
+
+    # for pid_str in sorted(id_train):
+    #     for cam_str in train_cameras:
+    #         img_dir = osp.join(dir_path, cam_str, pid_str)
+    #         if osp.isdir(img_dir):
+    #             for fname in sorted(os.listdir(img_dir)):
+    #                 img_path = osp.join(img_dir, fname)
+    #                 if osp.isfile(img_path):
+    #                     samples.append((img_path, int(pid_str), int(cam_str)))
+
+    # pid_container = set(pid for _, pid, _ in samples)
+    # pid2label = {pid: label for label, pid in enumerate(sorted(pid_container))}
+
+    # dataset = []
+    # for img_path, pid, camid in samples:
+    #     if relabel:
+    #         pid = pid2label[pid]
+    #     dataset.append((img_path, self.pid_begin + pid, camid, 0))
+
+    # return dataset
+
+    #代码中原来处理查询集的代码
+    # def _process_query(self, dir_path,file_path, exp_setting = None,relabel=False):
+    
+    # with open(file_path, 'r') as file:
+    #     ids = file.read().splitlines()
+    #     ids = [int(y) for y in ids[0].split(',')]
+    #     ids = ["%04d" % x for x in ids] 
+
+
+    # setting_name_split = exp_setting.split("_")
+    # if setting_name_split[1] == 'cctv' and setting_name_split[2] == 'ir':
+    #     query_cameras = ['07','08','09','10','11','12']
+    # elif setting_name_split[1] == 'cctv' and setting_name_split[2] == 'rgb':
+    #     query_cameras = ['01','02','03','04','05','06']
+    # elif setting_name_split[1] == 'uav' and setting_name_split[2] == 'ir':
+    #     query_cameras = ['14']
+    # elif setting_name_split[1] == 'uav' and setting_name_split[2] == 'rgb':
+    #     query_cameras = ['13']
+    # else:
+    #     print("!!!setting name error!!!!")
+    # files = []
+    # for id in sorted(ids):
+    #     for cam in query_cameras:
+    #         img_dir = osp.join(dir_path,cam,id)
+    #         if osp.isdir(img_dir):
+    #             new_files = sorted([img_dir+'/'+i for i in os.listdir(img_dir)])
+    #             files.extend(new_files)      
+    # pid_container = set()
+    # for img_path in files:
+    #     pid = int(img_path[-13:-9])
+    #     pid_container.add(pid)
+    # pid2label = {pid:label for label, pid in enumerate(pid_container)}
+    
+    # dataset = []
+    # for img_path in files:
+    #     camid, pid = int(img_path[-15]), int(img_path[-13:-9])
+        
+    #     if relabel: pid = pid2label[pid]
+
+    #     dataset.append((img_path, self.pid_begin + pid, camid, 0))
+    # return dataset
+
+
+        #代码中原来处理图库集的代码
+        # def _process_gallery(self, dir_path,file_path,exp_setting = None, relabel=False):
+        
+        # with open(file_path, 'r') as file:
+        #     ids = file.read().splitlines()
+        #     ids = [int(y) for y in ids[0].split(',')]
+        #     ids = ["%04d" % x for x in ids] 
+
+
+        # setting_name_split = exp_setting.split("_")
+        # if setting_name_split[3] == 'cctv' and setting_name_split[4] == 'ir':
+        #     gallery_cameras = ['07','08','09','10','11','12']
+        # elif setting_name_split[3] == 'cctv' and setting_name_split[4] == 'rgb':
+        #     gallery_cameras = ['01','02','03','04','05','06']
+        # elif setting_name_split[3] == 'uav' and setting_name_split[4] == 'ir':
+        #     gallery_cameras = ['14']
+        # elif setting_name_split[3] == 'uav' and setting_name_split[4] == 'rgb':
+        #     gallery_cameras = ['13']
+        # else:
+        #     print("!!!setting name error!!!!")
+        # files = []
+        # for id in sorted(ids):
+        #     for cam in gallery_cameras:
+        #         img_dir = osp.join(dir_path,cam,id)
+        #         if osp.isdir(img_dir):
+        #             new_files = sorted([img_dir+'/'+i for i in os.listdir(img_dir)])
+        #             files.extend(new_files)      
+        # pid_container = set()
+        # for img_path in files:
+        #     pid = int(img_path[-13:-9])
+        #     pid_container.add(pid)
+        # pid2label = {pid:label for label, pid in enumerate(pid_container)}
+       
+        # dataset = []
+        # for img_path in files:
+        #     camid, pid = int(img_path[-15]), int(img_path[-13:-9])
+            
+        #     if relabel: pid = pid2label[pid]
+
+        #     dataset.append((img_path, self.pid_begin + pid, camid, 0))
+        # return dataset

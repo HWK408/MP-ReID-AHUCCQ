@@ -56,21 +56,21 @@ def do_train_stage2(cfg,
 
     # train
     batch = cfg.SOLVER.STAGE2.IMS_PER_BATCH
-    i_ter = num_classes // batch
-    left = num_classes-batch* (num_classes//batch)
-    if left != 0 :
-        i_ter = i_ter+1
-    text_features = []
-    with torch.no_grad():
-        for i in range(i_ter):
-            if i+1 != i_ter:
-                l_list = torch.arange(i*batch, (i+1)* batch)
-            else:
-                l_list = torch.arange(i*batch, num_classes)
-            with torch.amp.autocast('cuda', enabled=True):
-                text_feature = model(label = l_list, get_text = True)
-            text_features.append(text_feature.cpu())
-        text_features = torch.cat(text_features, 0).cuda()
+    all_class_labels = torch.arange(num_classes, device=device)
+    text_features_by_view = {}
+
+    def get_text_features_for_view(view_id):
+        view_id = int(view_id)
+        if view_id not in text_features_by_view:
+            view_tensor = torch.full((num_classes,), view_id, dtype=torch.int64, device=device)
+            with torch.no_grad():
+                with torch.amp.autocast('cuda', enabled=True):
+                    text_features_by_view[view_id] = model(
+                        label=all_class_labels,
+                        get_text=True,
+                        view=view_tensor,
+                    ).detach()
+        return text_features_by_view[view_id]
 
     # Set coefficient for auxiliary loss
     load_balance_loss_coeff = 0.01 # You might want to move this to config later
@@ -90,12 +90,13 @@ def do_train_stage2(cfg,
             optimizer_center.zero_grad()
             img = img.to(device)
             target = vid.to(device)
+            prompt_view = target_view.to(device)
             if cfg.MODEL.SIE_CAMERA:
                 target_cam = target_cam.to(device)
             else: 
                 target_cam = None
             if cfg.MODEL.SIE_VIEW:
-                target_view = target_view.to(device)
+                target_view = prompt_view
             else: 
                 target_view = None
             with torch.amp.autocast('cuda', enabled=True):
@@ -111,10 +112,18 @@ def do_train_stage2(cfg,
                 else:
                     raise ValueError(f"Unexpected number of outputs from model: {len(model_outputs)}")
 
-                score = scores[0]
-                feat = feats_all[1]
+                score = scores
+                feat = feats_all
 
-                logits_i2t = image_features_proj @ text_features.t()
+                logits_i2t = torch.empty(
+                    (image_features_proj.shape[0], num_classes),
+                    device=image_features_proj.device,
+                    dtype=image_features_proj.dtype,
+                )
+                for view_id in prompt_view.unique(sorted=True):
+                    view_mask = prompt_view == view_id
+                    view_text_features = get_text_features_for_view(view_id.item())
+                    logits_i2t[view_mask] = image_features_proj[view_mask] @ view_text_features.t()
 
                 loss = loss_fn(score, feat, target, target_cam, logits_i2t)
 
@@ -167,10 +176,10 @@ def do_train_stage2(cfg,
             if cfg.MODEL.DIST_TRAIN:
                 if dist.get_rank() == 0:
                     torch.save(model.state_dict(),
-                               os.path.join(cfg.OUTPUT_DIR,cfg.DATASETS.EXP_SETTING, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
+                               os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
             else:
                 torch.save(model.state_dict(),
-                           os.path.join(cfg.OUTPUT_DIR,cfg.DATASETS.EXP_SETTING, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
+                           os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
 
         if epoch % eval_period == 0:
             if cfg.MODEL.DIST_TRAIN:

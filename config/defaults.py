@@ -349,3 +349,5 @@ _C.TEST.TTPT.TEMPERATURE = 0.07
 # ---------------------------------------------------------------------------- #
 # Path to checkpoint and saved log of trained model
 _C.OUTPUT_DIR = ""
+# Optional extra directory level under OUTPUT_DIR[/EXP_SETTING]
+_C.RUN_NAME = ""

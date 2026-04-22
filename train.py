@@ -11,6 +11,7 @@ import numpy as np
 import os
 import argparse
 from config import cfg_base as cfg
+from utils.output import resolve_output_dir
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -36,6 +37,7 @@ if __name__ == '__main__':
     if args.config_file != "":
         cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
+    cfg.OUTPUT_DIR = resolve_output_dir(cfg)
     cfg.freeze()
 
     set_seed(cfg.SOLVER.SEED)

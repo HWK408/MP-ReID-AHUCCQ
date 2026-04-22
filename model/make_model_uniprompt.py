@@ -144,6 +144,8 @@ class build_transformer(nn.Module):
         for param in self.prompt_learner.parameters():
             param.requires_grad = False
         self.prompt_learner.ctx_generic.requires_grad = True
+        for param in self.prompt_learner.visual_enhanced_net.parameters():
+            param.requires_grad = True
 
     def enable_stage1b_training(self):
         """
@@ -155,6 +157,8 @@ class build_transformer(nn.Module):
             param.requires_grad = False
         self.prompt_learner.ctx_modality.requires_grad = True
         self.prompt_learner.ctx_platform.requires_grad = True
+        for param in self.prompt_learner.visual_enhanced_net.parameters():
+            param.requires_grad = True
 
     def forward(self, x = None, label=None, get_image = False, get_text = False, cam_label= None, view_label=None,image_feature = None,get_raw_text = False,view = None,get_image_update = False,text_feature = None,get_more_image = False,exp_setting = None,get_image_vp = False):
         if get_text or get_raw_text:
@@ -165,7 +169,7 @@ class build_transformer(nn.Module):
                 elif self.model_name == 'ViT-B-16':
                     image_feature = image_features_proj[:,0]
 
-            prompts = self.prompt_learner(label, view=view)
+            prompts = self.prompt_learner(label, view=view, image_feature=image_feature)
             text_features = self.text_encoder(prompts, self.prompt_learner.tokenized_prompts)
             return text_features
 
@@ -331,7 +335,7 @@ class PromptLearner(nn.Module):
     def set_training_stage(self, stage):
         self.training_stage = stage
 
-    def forward(self, label, view=None):
+    def forward(self, label, view=None, image_feature=None):
         b = label.shape[0]
         ctx_dim = self.ctx_generic.size(-1)
 
@@ -362,12 +366,18 @@ class PromptLearner(nn.Module):
                 modal_ctx = self.ctx_modality[modal_indices]
                 plat_ctx = self.ctx_platform[plat_indices]
             else:
-                # Fallback: use average if view is not provided in stage 1b
-                modal_ctx = self.ctx_modality.mean(dim=0, keepdim=True).expand(b, -1, -1)
-                plat_ctx = self.ctx_platform.mean(dim=0, keepdim=True).expand(b, -1, -1)
+                # If view metadata is missing, do not average learned domain prompts.
+                modal_ctx = torch.zeros(b, self.ctx_modality.size(1), ctx_dim, device=generic_ctx.device, dtype=generic_ctx.dtype)
+                plat_ctx = torch.zeros(b, self.ctx_platform.size(1), ctx_dim, device=generic_ctx.device, dtype=generic_ctx.dtype)
 
         # 3. Concatenate to form the full 16-token context
         ctx = torch.cat([generic_ctx, modal_ctx, plat_ctx], dim=1)
+
+        # CoCoOp-style image-conditioned prompt bias.
+        if image_feature is not None:
+            meta_dtype = next(self.visual_enhanced_net.parameters()).dtype
+            dynamic_bias = self.visual_enhanced_net(F.normalize(image_feature.to(meta_dtype), dim=-1))
+            ctx = ctx + dynamic_bias.to(ctx.dtype).unsqueeze(1)
         
         # 4. Build the final prompt embeddings
         prefix = self.token_prefix.expand(b, -1, -1)

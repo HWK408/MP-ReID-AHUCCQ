@@ -29,7 +29,7 @@ DATALOADER:
 
 SOLVER:
   STAGE1:
-    IMS_PER_BATCH: 64
+    IMS_PER_BATCH: 256
     OPTIMIZER_NAME: "Adam"
     BASE_LR: 0.00035
     WARMUP_LR_INIT: 0.00001
@@ -43,7 +43,7 @@ SOLVER:
     WARMUP_EPOCHS: 5
   
   STAGE1A:
-    IMS_PER_BATCH: 64
+    IMS_PER_BATCH: 256
     OPTIMIZER_NAME: "Adam"
     BASE_LR: 0.00035
     WARMUP_LR_INIT: 0.00001
@@ -57,7 +57,7 @@ SOLVER:
     WARMUP_EPOCHS: 5
 
   STAGE1B:
-    IMS_PER_BATCH: 64
+    IMS_PER_BATCH: 256
     OPTIMIZER_NAME: "Adam"
     BASE_LR: 0.00035
     WARMUP_LR_INIT: 0.00001
@@ -71,7 +71,7 @@ SOLVER:
     WARMUP_EPOCHS: 5
   
   STAGE2:
-    IMS_PER_BATCH: 64
+    IMS_PER_BATCH: 256
     OPTIMIZER_NAME: "Adam"
     BASE_LR: 0.000005
     WARMUP_METHOD: 'linear'
@@ -91,9 +91,9 @@ SOLVER:
   
 TEST:
   EVAL: True
-  IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 256
   RE_RANKING: False
-  WEIGHT: '' #path to your checkpoint
+  WEIGHT: '/data1/hewenke/mp-reid/log/exp_uav_rgb_cctv_rgb/ViT-B-16_60.pth' #path to your checkpoint
   NECK_FEAT: 'before'
   FEAT_NORM: 'yes'
 
@@ -116,9 +116,9 @@ DATASETS:
 
   NAMES: ('mmmp')
   ROOT_DIR: ('/data0/hewenke/mp-reid')
-  EXP_SETTING: ('exp_cctv_ir_cctv_rgb')
+  EXP_SETTING: ('exp_uav_rgb_cctv_rgb')
 OUTPUT_DIR: '/data1/hewenke/mp-reid/log'
-# EXP_SETTING: 'exp_cctv_ir_cctv_rgb'
+# EXP_SETTING: 'exp_uav_rgb_cctv_rgb'
 
-# CUDA_VISIBLE_DEVICES=3 python train_uniprompt.py --config_file configs/ours
-# CUDA_VISIBLE_DEVICES=0 python train.py --config_file configs/ours/cctv_ir_cctv_rgb.yml
+
+# CUDA_VISIBLE_DEVICES=3 python train_uniprompt.py --config_file configs/ours/uav_rgb_cctv_rgb.yml

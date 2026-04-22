@@ -186,3 +186,5 @@ _C.TEST.EVAL = False
 # ---------------------------------------------------------------------------- #
 # Path to checkpoint and saved log of trained model
 _C.OUTPUT_DIR = ""
+# Optional extra directory level under OUTPUT_DIR
+_C.RUN_NAME = ""

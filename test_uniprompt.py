@@ -5,12 +5,13 @@ from datasets.make_dataloader_uniprompt import make_dataloader
 from model.make_model_uniprompt import make_model
 from processor.processor_uniprompt_stage2 import do_inference
 from utils.logger import setup_logger
+from utils.output import resolve_output_dir
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ReID Baseline Training")
     parser.add_argument(
-        "--config_file", default="configs/ours/exp_cctv_ir_cctv_rgb.yml", help="path to config file", type=str
+        "--config_file", default="configs/ours/cctv_ir_cctv_rgb.yml", help="path to config file", type=str
     )
     parser.add_argument("opts", help="Modify config options using the command-line", default=None,
                         nargs=argparse.REMAINDER)
@@ -20,6 +21,7 @@ if __name__ == "__main__":
     if args.config_file != "":
         cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
+    cfg.OUTPUT_DIR = resolve_output_dir(cfg)
     cfg.freeze()
 
     output_dir = cfg.OUTPUT_DIR
@@ -66,5 +68,4 @@ if __name__ == "__main__":
                  model,
                  val_loader,
                  num_query)
-
 
