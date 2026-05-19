@@ -117,6 +117,13 @@ DATASETS:
   NAMES: ('mmmp')
   ROOT_DIR: ('/data0/hewenke/mp-reid')
   EXP_SETTING: ('exp_uav_ir_cctv_ir')
+  CURRICULUM:
+    ENABLED: False
+    SCORE_FILE: 'curriculum_cache/exp_uav_ir_cctv_ir_clip_scores.pkl'
+    STAGE2_PHASES: ['easy', 'medium', 'full']
+    STAGE2_EPOCHS: [20, 20, 20]
+    EASY_RATIO: 0.5
+    MEDIUM_RATIO: 0.8
 OUTPUT_DIR: '/data1/hewenke/mp-reid/log'
 # EXP_SETTING: 'exp_uav_ir_cctv_ir'
 

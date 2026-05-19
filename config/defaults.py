@@ -99,6 +99,15 @@ _C.DATASETS.NAMES = ('market1501')
 # Root directory where datasets should be used (and downloaded if not found)
 _C.DATASETS.ROOT_DIR = ('../data')
 _C.DATASETS.EXP_SETTING = ('cctv_ir_cctv_rgb')
+_C.DATASETS.CURRICULUM = CN()
+_C.DATASETS.CURRICULUM.ENABLED = False
+_C.DATASETS.CURRICULUM.SCORE_FILE = ""
+_C.DATASETS.CURRICULUM.PHASE = "full"
+_C.DATASETS.CURRICULUM.EASY_RATIO = 0.5
+_C.DATASETS.CURRICULUM.MEDIUM_RATIO = 0.8
+_C.DATASETS.CURRICULUM.MIN_SAMPLES_PER_ID_DOMAIN = 1
+_C.DATASETS.CURRICULUM.STAGE2_PHASES = ["easy", "medium", "full"]
+_C.DATASETS.CURRICULUM.STAGE2_EPOCHS = [20, 20, 20]
 
 # -----------------------------------------------------------------------------
 # DataLoader

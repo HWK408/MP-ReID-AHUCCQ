@@ -18,6 +18,7 @@ from .sysu import SYSU
 from .regdb import RegDB
 from .agreidv2 import AGReIDv2
 from .g2aps import G2APS
+from .curriculum import filter_train_data
 
 __factory = {
     'market1501': Market1501,
@@ -49,7 +50,7 @@ def val_collate_fn(batch):
     camids_batch = torch.tensor(camids, dtype=torch.int64)
     return torch.stack(imgs, dim=0), pids, camids, camids_batch, viewids, img_paths
 
-def make_dataloader(cfg):
+def make_dataloader(cfg, curriculum_phase=None):
     # 数据增强
     train_transforms = T.Compose([
             T.Resize(cfg.INPUT.SIZE_TRAIN, interpolation=3),# 调整图片大小。 [256, 128]
@@ -72,7 +73,17 @@ def make_dataloader(cfg):
 
     dataset = __factory[cfg.DATASETS.NAMES](root=cfg.DATASETS.ROOT_DIR,exp_setting = cfg.DATASETS.EXP_SETTING)# names：mmmp
     
-    train_set = ImageDataset(dataset.train, train_transforms)
+    train_data_stage2, curriculum_info = filter_train_data(dataset.train, cfg, curriculum_phase)
+    if curriculum_info["enabled"]:
+        print(
+            "=> Stage2 curriculum phase {}: using {}/{} training images".format(
+                curriculum_info["phase"],
+                curriculum_info["filtered"],
+                curriculum_info["original"],
+            )
+        )
+
+    train_set = ImageDataset(train_data_stage2, train_transforms)
     train_set_normal = ImageDataset(dataset.train, val_transforms)
     num_classes = dataset.num_train_pids
     cam_num = dataset.num_train_cams
@@ -82,7 +93,7 @@ def make_dataloader(cfg):
         if cfg.MODEL.DIST_TRAIN:
             print('DIST_TRAIN START')
             mini_batch_size = cfg.SOLVER.STAGE2.IMS_PER_BATCH // dist.get_world_size()
-            data_sampler = RandomIdentitySampler_DDP(dataset.train, cfg.SOLVER.STAGE2.IMS_PER_BATCH, cfg.DATALOADER.NUM_INSTANCE)
+            data_sampler = RandomIdentitySampler_DDP(train_data_stage2, cfg.SOLVER.STAGE2.IMS_PER_BATCH, cfg.DATALOADER.NUM_INSTANCE)
             batch_sampler = torch.utils.data.sampler.BatchSampler(data_sampler, mini_batch_size, True)
             train_loader_stage2 = torch.utils.data.DataLoader(
                 train_set,
@@ -94,7 +105,7 @@ def make_dataloader(cfg):
         else:
             train_loader_stage2 = DataLoader(
                 train_set, batch_size=cfg.SOLVER.STAGE2.IMS_PER_BATCH,
-                sampler=RandomIdentitySampler(dataset.train, cfg.SOLVER.STAGE2.IMS_PER_BATCH, cfg.DATALOADER.NUM_INSTANCE),
+                sampler=RandomIdentitySampler(train_data_stage2, cfg.SOLVER.STAGE2.IMS_PER_BATCH, cfg.DATALOADER.NUM_INSTANCE),
                 num_workers=num_workers, collate_fn=train_collate_fn
             )
     elif cfg.DATALOADER.SAMPLER == 'softmax':

@@ -26,6 +26,18 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
+
+def resolve_stage2_plan(cfg):
+    curriculum_cfg = getattr(cfg.DATASETS, "CURRICULUM", None)
+    if curriculum_cfg is None or not curriculum_cfg.ENABLED:
+        return [("full", int(cfg.SOLVER.STAGE2.MAX_EPOCHS))]
+
+    phases = list(curriculum_cfg.STAGE2_PHASES)
+    epochs = [int(epoch) for epoch in curriculum_cfg.STAGE2_EPOCHS]
+    if len(phases) != len(epochs):
+        raise ValueError("DATASETS.CURRICULUM.STAGE2_PHASES and STAGE2_EPOCHS must have the same length.")
+    return [(phase, epoch) for phase, epoch in zip(phases, epochs) if epoch > 0]
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="ReID Baseline Training")# 创建一个参数解析器对象
@@ -70,7 +82,7 @@ if __name__ == '__main__':
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
 
     train_loader_stage2, train_loader_stage1, val_loader, \
-    num_query, num_classes, camera_num, view_num = make_dataloader(cfg)
+    num_query, num_classes, camera_num, view_num = make_dataloader(cfg, curriculum_phase="full")
 
     # Use original config for model creation, as stage1 does not use MoE anyway.
     model = make_model(cfg, num_class=num_classes, camera_num=camera_num, view_num=view_num)
@@ -168,29 +180,39 @@ if __name__ == '__main__':
     # Optional: Log the final trainable parameters
     # log_trainable_parameters(model, "After Merge & Simple Freeze for Stage 2a")
 
-    # 2a stage, train based on the requires_grad settings above
+    # 2a stage, train based on the requires_grad settings above.
+    stage2_plan = resolve_stage2_plan(cfg)
+    curriculum_enabled = getattr(cfg.DATASETS.CURRICULUM, "ENABLED", False)
     logger.info("2a stage, train parameters marked as trainable...")
-    optimizer_2stage, optimizer_center_2stage = make_optimizer_2astage(cfg, model, center_criterion)
-    scheduler_2stage = WarmupMultiStepLR(optimizer_2stage, cfg.SOLVER.STAGE2.STEPS, cfg.SOLVER.STAGE2.GAMMA, cfg.SOLVER.STAGE2.WARMUP_FACTOR,
-                                  cfg.SOLVER.STAGE2.WARMUP_ITERS, cfg.SOLVER.STAGE2.WARMUP_METHOD)
+    logger.info("Stage 2 curriculum plan: {}".format(stage2_plan))
 
-    do_train_stage2(
-        cfg,
-        model,
-        center_criterion,
-        train_loader_stage2,
-        val_loader,
-        optimizer_2stage,
-        optimizer_center_2stage,
-        scheduler_2stage,
-        loss_func,
-        num_query, 
-        args.local_rank,
-        max_epochs=cfg.SOLVER.STAGE2.MAX_EPOCHS,
-        log_period=cfg.SOLVER.STAGE2.LOG_PERIOD,
-        checkpoint_period=cfg.SOLVER.STAGE2.CHECKPOINT_PERIOD,
-        eval_period=cfg.SOLVER.STAGE2.EVAL_PERIOD
-    )
+    for phase, phase_epochs in stage2_plan:
+        if curriculum_enabled:
+            logger.info("===== Stage 2 curriculum phase: {} ({} epochs) =====".format(phase, phase_epochs))
+            train_loader_stage2, _, _, _, _, _, _ = make_dataloader(cfg, curriculum_phase=phase)
+
+        optimizer_2stage, optimizer_center_2stage = make_optimizer_2astage(cfg, model, center_criterion)
+        scheduler_2stage = WarmupMultiStepLR(optimizer_2stage, cfg.SOLVER.STAGE2.STEPS, cfg.SOLVER.STAGE2.GAMMA, cfg.SOLVER.STAGE2.WARMUP_FACTOR,
+                                      cfg.SOLVER.STAGE2.WARMUP_ITERS, cfg.SOLVER.STAGE2.WARMUP_METHOD)
+
+        do_train_stage2(
+            cfg,
+            model,
+            center_criterion,
+            train_loader_stage2,
+            val_loader,
+            optimizer_2stage,
+            optimizer_center_2stage,
+            scheduler_2stage,
+            loss_func,
+            num_query,
+            args.local_rank,
+            max_epochs=phase_epochs,
+            log_period=cfg.SOLVER.STAGE2.LOG_PERIOD,
+            checkpoint_period=min(cfg.SOLVER.STAGE2.CHECKPOINT_PERIOD, phase_epochs),
+            eval_period=min(cfg.SOLVER.STAGE2.EVAL_PERIOD, phase_epochs),
+            stage_tag="stage2_{}".format(phase) if curriculum_enabled else None
+        )
 
     do_inference(
         cfg,

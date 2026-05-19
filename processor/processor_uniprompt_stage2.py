@@ -22,14 +22,15 @@ def do_train_stage2(cfg,
              max_epochs,
              log_period,
              checkpoint_period,
-             eval_period):
+             eval_period,
+             stage_tag=None):
     instance = cfg.DATALOADER.NUM_INSTANCE
 
     device = "cuda"
     epochs = max_epochs
 
     logger = logging.getLogger("transreid.train")
-    logger.info('start training')
+    logger.info('start training{}'.format(" ({})".format(stage_tag) if stage_tag else ""))
     _LOCAL_PROCESS_GROUP = None
     if device:
         model.to(local_rank)
@@ -152,13 +153,14 @@ def do_train_stage2(cfg,
                     .format(epoch, time_per_batch, train_loader_stage2.batch_size / time_per_batch))
 
         if epoch % checkpoint_period == 0:
+            suffix = '_{}_{}.pth'.format(stage_tag, epoch) if stage_tag else '_{}.pth'.format(epoch)
             if cfg.MODEL.DIST_TRAIN:
                 if dist.get_rank() == 0:
                     torch.save(model.state_dict(),
-                               os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
+                               os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + suffix))
             else:
                 torch.save(model.state_dict(),
-                           os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
+                           os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + suffix))
 
         if epoch % eval_period == 0:
             if cfg.MODEL.DIST_TRAIN:
