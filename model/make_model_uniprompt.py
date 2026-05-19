@@ -160,7 +160,7 @@ class build_transformer(nn.Module):
         for param in self.prompt_learner.visual_enhanced_net.parameters():
             param.requires_grad = True
 
-    def forward(self, x = None, label=None, get_image = False, get_text = False, cam_label= None, view_label=None,image_feature = None,get_raw_text = False,view = None,get_image_update = False,text_feature = None,get_more_image = False,exp_setting = None,get_image_vp = False):
+    def forward(self, x = None, label=None, get_image = False, get_text = False, cam_label= None, view_label=None,image_feature = None,get_raw_text = False,view = None,get_image_update = False,text_feature = None,get_more_image = False,exp_setting = None,get_image_vp = False, prompt_mode='full'):
         if get_text or get_raw_text:
             if get_text and image_feature is None and x is not None:
                 _, _, image_features_proj = self.image_encoder(x)
@@ -169,7 +169,7 @@ class build_transformer(nn.Module):
                 elif self.model_name == 'ViT-B-16':
                     image_feature = image_features_proj[:,0]
 
-            prompts = self.prompt_learner(label, view=view, image_feature=image_feature)
+            prompts = self.prompt_learner(label, view=view, image_feature=image_feature, prompt_mode=prompt_mode)
             text_features = self.text_encoder(prompts, self.prompt_learner.tokenized_prompts)
             return text_features
 
@@ -278,6 +278,7 @@ def load_clip_to_cpu(backbone_name, h_resolution, w_resolution, vision_stride_si
 class PromptLearner(nn.Module):
     def __init__(self, num_class, dataset_name, dtype, token_embedding, exp_setting):
         super().__init__()  
+        self.num_class = num_class
         
         # --- Hyperparameters ---
         ctx_dim = 512
@@ -335,7 +336,7 @@ class PromptLearner(nn.Module):
     def set_training_stage(self, stage):
         self.training_stage = stage
 
-    def forward(self, label, view=None, image_feature=None):
+    def forward(self, label, view=None, image_feature=None, prompt_mode='full'):
         b = label.shape[0]
         ctx_dim = self.ctx_generic.size(-1)
 
@@ -370,14 +371,25 @@ class PromptLearner(nn.Module):
                 modal_ctx = torch.zeros(b, self.ctx_modality.size(1), ctx_dim, device=generic_ctx.device, dtype=generic_ctx.dtype)
                 plat_ctx = torch.zeros(b, self.ctx_platform.size(1), ctx_dim, device=generic_ctx.device, dtype=generic_ctx.dtype)
 
-        # 3. Concatenate to form the full 16-token context
-        ctx = torch.cat([generic_ctx, modal_ctx, plat_ctx], dim=1)
-
         # CoCoOp-style image-conditioned prompt bias.
         if image_feature is not None:
             meta_dtype = next(self.visual_enhanced_net.parameters()).dtype
             dynamic_bias = self.visual_enhanced_net(F.normalize(image_feature.to(meta_dtype), dim=-1))
-            ctx = ctx + dynamic_bias.to(ctx.dtype).unsqueeze(1)
+            # Following paper description, VE-Net conditions modality/platform prompts.
+            if prompt_mode in ('full', 'modality'):
+                modal_ctx = modal_ctx + dynamic_bias.to(modal_ctx.dtype).unsqueeze(1)
+            if prompt_mode in ('full', 'platform'):
+                plat_ctx = plat_ctx + dynamic_bias.to(plat_ctx.dtype).unsqueeze(1)
+
+        if prompt_mode == 'modality':
+            plat_ctx = torch.zeros_like(plat_ctx)
+        elif prompt_mode == 'platform':
+            modal_ctx = torch.zeros_like(modal_ctx)
+        elif prompt_mode != 'full':
+            raise ValueError(f"Unsupported prompt_mode: {prompt_mode}")
+
+        # 3. Concatenate to form the full 16-token context
+        ctx = torch.cat([generic_ctx, modal_ctx, plat_ctx], dim=1)
         
         # 4. Build the final prompt embeddings
         prefix = self.token_prefix.expand(b, -1, -1)

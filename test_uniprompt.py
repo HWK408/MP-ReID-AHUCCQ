@@ -61,7 +61,7 @@ if __name__ == "__main__":
                 all_rank_5 = all_rank_5 + rank5
                 all_mAP = all_mAP + mAP
 
-            logger.info("rank_1:{}, rank_5 {} : trial : {}".format(rank_1, rank5, mAP, trial))
+            logger.info("rank_1:{}, rank_5 {}, mAP {} : trial : {}".format(rank_1, rank5, mAP, trial))
         logger.info("sum_rank_1:{:.1%}, sum_rank_5 {:.1%}, sum_mAP {:.1%}".format(all_rank_1.sum()/10.0, all_rank_5.sum()/10.0, all_mAP.sum()/10.0))
     else:
        do_inference(cfg,

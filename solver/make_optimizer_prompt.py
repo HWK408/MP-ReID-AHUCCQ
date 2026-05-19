@@ -51,7 +51,7 @@ def make_optimizer_1stage(cfg, model, stage_name):
     if optimizer_name == 'SGD':
         optimizer = torch.optim.SGD(params, momentum=stage_cfg.MOMENTUM)
     elif optimizer_name == 'AdamW':
-        optimizer = torch.optim.AdamW(params, amsgrad=stage_cfg.AMSGRAD)
+        optimizer = torch.optim.AdamW(params, amsgrad=getattr(stage_cfg, "AMSGRAD", False))
     else:
         optimizer = getattr(torch.optim, optimizer_name)(params)
         

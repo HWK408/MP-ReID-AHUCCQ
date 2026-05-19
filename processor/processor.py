@@ -205,4 +205,4 @@ def do_inference(cfg,
     logger.info("mAP: {:.1%}".format(mAP))
     for r in [1, 5, 10]:
         logger.info("CMC curve, Rank-{:<3}:{:.1%}".format(r, cmc[r - 1]))
-    return cmc[0], cmc[4]
+    return cmc[0], cmc[4], mAP

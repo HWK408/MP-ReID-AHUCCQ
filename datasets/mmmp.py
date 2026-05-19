@@ -13,6 +13,9 @@ class MMMP(BaseImageDataset):
     def __init__(self,root = '' , verbose = True, pid_begin = 0,exp_setting = None, **kwargs):
         super(MMMP,self).__init__()
         # self.cfg = cfg
+        self.dataset_dir = root if root else self.dataset_dir
+        if exp_setting is None:
+            raise ValueError("MMMP requires DATASETS.EXP_SETTING, e.g. 'exp_cctv_ir_cctv_rgb'.")
         self.exp_setting = exp_setting #
         self.setting_name_split = exp_setting.split("_")
         self.file_path_train = osp.join(self.dataset_dir,self.exp_setting,'train_id.txt')
@@ -27,6 +30,8 @@ class MMMP(BaseImageDataset):
             train = self._process_train(self.dataset_dir,self.file_path_train,self.file_path_val,self.exp_setting, relabel=True)
             query = self._process_query(self.dataset_dir,self.file_path,self.exp_setting, relabel=False)
             gallery = self._process_gallery(self.dataset_dir,self.file_path,self.exp_setting, relabel=False)
+        else:
+            raise ValueError(f"Unsupported MMMP exp_setting: {self.exp_setting}")
 
         if verbose:
             print("=> MMMP loaded")

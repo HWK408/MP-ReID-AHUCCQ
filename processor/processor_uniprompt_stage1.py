@@ -8,6 +8,19 @@ import collections
 from torch.nn import functional as F
 from loss.supcontrast import SupConLoss
 
+def _view_to_modality_platform(view_ids):
+    """
+    Convert view IDs to modality/platform labels following MMMP camera mapping:
+    0-5: cctv_rgb, 6-11: cctv_ir, 12: uav_rgb, 13: uav_ir.
+    """
+    modality = torch.zeros_like(view_ids)
+    modality[(view_ids >= 6) & (view_ids < 12)] = 1
+    modality[view_ids == 13] = 1
+
+    platform = torch.zeros_like(view_ids)
+    platform[view_ids >= 12] = 1
+    return modality, platform
+
 def do_train_stage1(cfg,
              model,
              train_loader_stage1,
@@ -82,14 +95,32 @@ def do_train_stage1(cfg,
 
             with torch.cuda.amp.autocast(enabled=True):
                 if is_stage1b:
-                    text_features = model(label=target, get_text=True, view=target_view_batch, image_feature=image_features)
+                    text_features_m = model(
+                        label=target,
+                        get_text=True,
+                        view=target_view_batch,
+                        image_feature=image_features,
+                        prompt_mode='modality',
+                    )
+                    text_features_p = model(
+                        label=target,
+                        get_text=True,
+                        view=target_view_batch,
+                        image_feature=image_features,
+                        prompt_mode='platform',
+                    )
+
+                    modality_target, platform_target = _view_to_modality_platform(target_view_batch)
+                    loss_m_i2t = xent(image_features, text_features_m, modality_target, modality_target)
+                    loss_m_t2i = xent(text_features_m, image_features, modality_target, modality_target)
+                    loss_p_i2t = xent(image_features, text_features_p, platform_target, platform_target)
+                    loss_p_t2i = xent(text_features_p, image_features, platform_target, platform_target)
+                    loss = loss_m_i2t + loss_m_t2i + loss_p_i2t + loss_p_t2i
                 else:
-                    text_features = model(label=target, get_text=True, view=None, image_feature=image_features)
-
-            loss_i2t = xent(image_features, text_features, target, target)
-            loss_t2i = xent(text_features, image_features, target, target)
-
-            loss = loss_i2t + loss_t2i
+                    text_features = model(label=target, get_text=True, view=None, image_feature=image_features, prompt_mode='full')
+                    loss_i2t = xent(image_features, text_features, target, target)
+                    loss_t2i = xent(text_features, image_features, target, target)
+                    loss = loss_i2t + loss_t2i
 
             scaler.scale(loss).backward()
 

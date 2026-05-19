@@ -7,8 +7,6 @@ from utils.meter import AverageMeter
 from utils.metrics import R1_mAP_eval
 import torch.distributed as dist
 from torch.nn import functional as F
-from loss.supcontrast import SupConLoss
-from model.clip.model import load_balancing_loss_func
 import numpy as np
 
 def do_train_stage2(cfg,
@@ -47,8 +45,6 @@ def do_train_stage2(cfg,
 
     evaluator = R1_mAP_eval(num_query, max_rank=50, feat_norm=cfg.TEST.FEAT_NORM)
     scaler = torch.amp.GradScaler()
-    xent = SupConLoss(device)
-    
     # train
     import time
     from datetime import timedelta
@@ -71,10 +67,6 @@ def do_train_stage2(cfg,
                         view=view_tensor,
                     ).detach()
         return text_features_by_view[view_id]
-
-    # Set coefficient for auxiliary loss
-    load_balance_loss_coeff = 0.01 # You might want to move this to config later
-    logger.info(f"Using Load Balancing Loss Coefficient: {load_balance_loss_coeff}")
 
     for epoch in range(1, epochs + 1):
         start_time = time.time()
@@ -105,10 +97,10 @@ def do_train_stage2(cfg,
                                       view_label=target_view)
 
                 if len(model_outputs) == 4:
-                    scores, feats_all, image_features_proj, router_logits = model_outputs
-                elif len(model_outputs) == 3: # Fallback for non-MoE or if logits aren't returned
-                     scores, feats_all, image_features_proj = model_outputs
-                     router_logits = None
+                    # In the current Uni-Prompt path (without MoE), the 4th item is not router logits.
+                    scores, feats_all, image_features_proj, _ = model_outputs
+                elif len(model_outputs) == 3:
+                    scores, feats_all, image_features_proj = model_outputs
                 else:
                     raise ValueError(f"Unexpected number of outputs from model: {len(model_outputs)}")
 
@@ -127,17 +119,6 @@ def do_train_stage2(cfg,
 
                 loss = loss_fn(score, feat, target, target_cam, logits_i2t)
 
-                if router_logits is not None and cfg.MODEL.MOE.ENABLED and load_balance_loss_coeff > 0:
-                    l_aux = 0
-                    num_moe_layers_with_logits = router_logits.shape[0]
-                    if num_moe_layers_with_logits > 0:
-                        for layer_logits in router_logits:
-                            l_aux += load_balancing_loss_func(layer_logits, cfg.MODEL.MOE.TOP_K)
-                        l_aux = l_aux / num_moe_layers_with_logits
-                        loss = loss + load_balance_loss_coeff * l_aux
-                    else:
-                        logger.warning("router_logits received but has 0 layers?")
-
             scaler.scale(loss).backward()
 
             scaler.step(optimizer)
@@ -145,7 +126,7 @@ def do_train_stage2(cfg,
 
             if 'center' in cfg.MODEL.METRIC_LOSS_TYPE:
                 for param in center_criterion.parameters():
-                    param.grad.data *= (1. / cfg.SOLVER.CENTER_LOSS_WEIGHT)
+                    param.grad.data *= (1. / cfg.SOLVER.STAGE2.CENTER_LOSS_WEIGHT)
                 scaler.step(optimizer_center)
                 scaler.update()
 
@@ -160,8 +141,6 @@ def do_train_stage2(cfg,
                 log_msg = "Epoch[{}] Iteration[{}/{}] Loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}" \
                           .format(epoch, (n_iter + 1), len(train_loader_stage2),
                                   loss_meter.avg, acc_meter.avg, current_lr)
-                if 'l_aux' in locals() and l_aux is not None and load_balance_loss_coeff > 0:
-                     log_msg += f", AuxLoss: {load_balance_loss_coeff * l_aux.item():.3f}"
                 logger.info(log_msg)
 
         end_time = time.time()
@@ -272,7 +251,7 @@ def do_inference(cfg,
     logger.info("mAP: {:.1%}".format(mAP))
     for r in [1, 5, 10]:
         logger.info("CMC curve, Rank-{:<3}:{:.1%}".format(r, cmc[r - 1]))
-    return cmc[0], cmc[4]
+    return cmc[0], cmc[4], mAP
 
 # 新增函数，用于实现 TTA + TTPT + CLIP-style Evaluation (Option B)
 def do_inference_ttpt_clipstyle(cfg,
@@ -325,6 +304,9 @@ def do_inference_ttpt_clipstyle(cfg,
             tokenized_prompts = prompt_learner.tokenized_prompts.to(device)
             num_classes = prompt_learner.num_class
             all_class_labels = torch.arange(num_classes, device=device)
+            if not hasattr(prompt_learner, "cls_ctx"):
+                logger.warning("Legacy TTPT expects prompt_learner.cls_ctx, but current Uni-Prompt uses ctx_generic/ctx_modality/ctx_platform. Falling back to standard inference.")
+                return do_inference(cfg, model, val_loader, num_query)
             logger.info("Successfully accessed PromptLearner and TextEncoder for TTPT.")
         except AttributeError as e:
             logger.error(f"Failed to get modules needed for TTPT: {e}. Disabling TTPT.")
@@ -533,7 +515,7 @@ def do_inference_ttpt_clipstyle(cfg,
 
     torch.cuda.empty_cache()
 
-    return rank1, rank5
+    return rank1, rank5, mAP
 
 # --- New Function for Option A ---
 def do_inference_ttpt_option_a(cfg,
@@ -699,4 +681,4 @@ def do_inference_ttpt_option_a(cfg,
     logger.info(f"Returning Rank-1: {rank1:.1%}, Rank-5: {rank5:.1%}")
 
     torch.cuda.empty_cache()
-    return rank1, rank5
+    return rank1, rank5, mAP

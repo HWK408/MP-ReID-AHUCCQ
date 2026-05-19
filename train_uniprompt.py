@@ -1,7 +1,7 @@
 from utils.logger import setup_logger
 from datasets.make_dataloader_uniprompt import make_dataloader
 from model.make_model_uniprompt import make_model
-from solver.make_optimizer_prompt import make_optimizer_1stage, make_optimizer_2astage, make_optimizer_2bstage
+from solver.make_optimizer_prompt import make_optimizer_1stage, make_optimizer_2astage
 from solver.scheduler_factory import create_scheduler
 from solver.lr_scheduler import WarmupMultiStepLR
 from loss.make_loss import make_loss
@@ -130,16 +130,13 @@ if __name__ == '__main__':
     #                         End of Two-Stage Prompt Training
     # =================================================================================
 
-    run_stage2b = False
     if cfg.MODEL.MOE.ENABLED:
-        if hasattr(model, "switch_to_moe_model"):
-            model.switch_to_moe_model(cfg)
-            logger.info(model)
-            run_stage2b = True
-        else:
-            logger.warning("MODEL.MOE.ENABLED is True, but switch_to_moe_model is not implemented. Skipping unsupported Stage 2b.")
+        logger.warning(
+            "MODEL.MOE.ENABLED=True was set, but current training pipeline runs Uni-Prompt without MoE. "
+            "Skipping all MoE/Stage2b logic by design."
+        )
     else:
-        logger.info("Skipping Stage 2b because MODEL.MOE.ENABLED is False.")
+        logger.info("Running pure Uni-Prompt pipeline (MoE/Stage2b disabled).")
 
 
     # --- Add this block to set requires_grad for Stage 2a ---
@@ -194,31 +191,7 @@ if __name__ == '__main__':
         checkpoint_period=cfg.SOLVER.STAGE2.CHECKPOINT_PERIOD,
         eval_period=cfg.SOLVER.STAGE2.EVAL_PERIOD
     )
-    
-    
-    if run_stage2b:
-        logger.info("2b stage, train gate and image_encoder mlp (except experts)")
-        optimizer_2stage, optimizer_center_2stage = make_optimizer_2bstage(cfg, model, center_criterion)
-        scheduler_2stage = WarmupMultiStepLR(optimizer_2stage, cfg.SOLVER.STAGE2.STEPS, cfg.SOLVER.STAGE2.GAMMA, cfg.SOLVER.STAGE2.WARMUP_FACTOR,
-                                    cfg.SOLVER.STAGE2.WARMUP_ITERS, cfg.SOLVER.STAGE2.WARMUP_METHOD)
-        do_train_stage2(
-            cfg,
-            model,
-            center_criterion,
-            train_loader_stage2,
-            val_loader,
-            optimizer_2stage,
-            optimizer_center_2stage,
-            scheduler_2stage,
-            loss_func,
-            num_query,  
-            args.local_rank,
-            max_epochs=cfg.SOLVER.STAGE2.MAX_EPOCHS,
-            log_period=cfg.SOLVER.STAGE2.LOG_PERIOD,
-            checkpoint_period=cfg.SOLVER.STAGE2.CHECKPOINT_PERIOD,
-            eval_period=cfg.SOLVER.STAGE2.EVAL_PERIOD
-        )
-    
+
     do_inference(
         cfg,
         model,
