@@ -186,14 +186,21 @@ if __name__ == '__main__':
     logger.info("2a stage, train parameters marked as trainable...")
     logger.info("Stage 2 curriculum plan: {}".format(stage2_plan))
 
+    optimizer_2stage, optimizer_center_2stage = make_optimizer_2astage(cfg, model, center_criterion)
+    scheduler_2stage = WarmupMultiStepLR(
+        optimizer_2stage,
+        cfg.SOLVER.STAGE2.STEPS,
+        cfg.SOLVER.STAGE2.GAMMA,
+        cfg.SOLVER.STAGE2.WARMUP_FACTOR,
+        cfg.SOLVER.STAGE2.WARMUP_ITERS,
+        cfg.SOLVER.STAGE2.WARMUP_METHOD,
+    )
+    stage2_epoch_offset = 0
+
     for phase, phase_epochs in stage2_plan:
         if curriculum_enabled:
             logger.info("===== Stage 2 curriculum phase: {} ({} epochs) =====".format(phase, phase_epochs))
             train_loader_stage2, _, _, _, _, _, _ = make_dataloader(cfg, curriculum_phase=phase)
-
-        optimizer_2stage, optimizer_center_2stage = make_optimizer_2astage(cfg, model, center_criterion)
-        scheduler_2stage = WarmupMultiStepLR(optimizer_2stage, cfg.SOLVER.STAGE2.STEPS, cfg.SOLVER.STAGE2.GAMMA, cfg.SOLVER.STAGE2.WARMUP_FACTOR,
-                                      cfg.SOLVER.STAGE2.WARMUP_ITERS, cfg.SOLVER.STAGE2.WARMUP_METHOD)
 
         do_train_stage2(
             cfg,
@@ -211,8 +218,10 @@ if __name__ == '__main__':
             log_period=cfg.SOLVER.STAGE2.LOG_PERIOD,
             checkpoint_period=min(cfg.SOLVER.STAGE2.CHECKPOINT_PERIOD, phase_epochs),
             eval_period=min(cfg.SOLVER.STAGE2.EVAL_PERIOD, phase_epochs),
-            stage_tag="stage2_{}".format(phase) if curriculum_enabled else None
+            stage_tag="stage2_{}".format(phase) if curriculum_enabled else None,
+            epoch_offset=stage2_epoch_offset
         )
+        stage2_epoch_offset += phase_epochs
 
     do_inference(
         cfg,

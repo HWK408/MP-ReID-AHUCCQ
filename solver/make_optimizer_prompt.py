@@ -36,16 +36,34 @@ import logging # 导入 logging 模块
 #         optimizer = getattr(torch.optim, cfg.SOLVER.STAGE1.OPTIMIZER_NAME)(params)
 #     return optimizer
 def make_optimizer_1stage(cfg, model, stage_name):
+    logger = logging.getLogger("transreid.train")
     stage_cfg = getattr(cfg.SOLVER, stage_name)
     
     params = []
+    trainable_param_count = 0
+    total_param_count = 0
+    logger.info("--- {} Optimizer: Finding Trainable Parameters ---".format(stage_name))
     for key, value in model.named_parameters():
+        total_param_count += value.numel()
         if not value.requires_grad:
             continue
         
         lr = stage_cfg.BASE_LR
         weight_decay = stage_cfg.WEIGHT_DECAY
         params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
+        trainable_param_count += value.numel()
+        logger.info(f"  [Trainable] {key} (Size: {value.shape}, LR: {lr:.2e}, WD: {weight_decay:.2e})")
+
+    logger.info(
+        "--- {} Optimizer: Total trainable parameters: {} / {} ({:.2%})".format(
+            stage_name,
+            trainable_param_count,
+            total_param_count,
+            trainable_param_count / total_param_count if total_param_count else 0,
+        )
+    )
+    if not params:
+        logger.warning("Warning: No trainable parameters found for {} optimizer.".format(stage_name))
 
     optimizer_name = stage_cfg.OPTIMIZER_NAME
     if optimizer_name == 'SGD':

@@ -117,7 +117,7 @@ def do_train_stage1(cfg,
                     loss_p_t2i = xent(text_features_p, image_features, platform_target, platform_target)
                     loss = loss_m_i2t + loss_m_t2i + loss_p_i2t + loss_p_t2i
                 else:
-                    text_features = model(label=target, get_text=True, view=None, image_feature=image_features, prompt_mode='full')
+                    text_features = model(label=target, get_text=True, view=None, image_feature=image_features, prompt_mode='generic')
                     loss_i2t = xent(image_features, text_features, target, target)
                     loss_t2i = xent(text_features, image_features, target, target)
                     loss = loss_i2t + loss_t2i

@@ -135,26 +135,26 @@ class build_transformer(nn.Module):
         # Initialize in stage1a by default
         self.enable_stage1a_training()
 
+    def _freeze_all_parameters(self):
+        for param in self.parameters():
+            param.requires_grad = False
+
     def enable_stage1a_training(self):
         """
         Enables training for Stage 1a: trains only the generic context vectors.
         """
         print("Enabling Stage 1a Training: Generic Context only.")
+        self._freeze_all_parameters()
         self.prompt_learner.set_training_stage('1a')
-        for param in self.prompt_learner.parameters():
-            param.requires_grad = False
         self.prompt_learner.ctx_generic.requires_grad = True
-        for param in self.prompt_learner.visual_enhanced_net.parameters():
-            param.requires_grad = True
 
     def enable_stage1b_training(self):
         """
         Enables training for Stage 1b: trains only the domain-specific context vectors.
         """
         print("Enabling Stage 1b Training: Domain-Specific Context only.")
+        self._freeze_all_parameters()
         self.prompt_learner.set_training_stage('1b')
-        for param in self.prompt_learner.parameters():
-            param.requires_grad = False
         self.prompt_learner.ctx_modality.requires_grad = True
         self.prompt_learner.ctx_platform.requires_grad = True
         for param in self.prompt_learner.visual_enhanced_net.parameters():
@@ -372,7 +372,7 @@ class PromptLearner(nn.Module):
                 plat_ctx = torch.zeros(b, self.ctx_platform.size(1), ctx_dim, device=generic_ctx.device, dtype=generic_ctx.dtype)
 
         # CoCoOp-style image-conditioned prompt bias.
-        if image_feature is not None:
+        if image_feature is not None and self.training_stage != '1a':
             meta_dtype = next(self.visual_enhanced_net.parameters()).dtype
             dynamic_bias = self.visual_enhanced_net(F.normalize(image_feature.to(meta_dtype), dim=-1))
             # Following paper description, VE-Net conditions modality/platform prompts.
@@ -382,9 +382,14 @@ class PromptLearner(nn.Module):
                 plat_ctx = plat_ctx + dynamic_bias.to(plat_ctx.dtype).unsqueeze(1)
 
         if prompt_mode == 'modality':
+            generic_ctx = torch.zeros_like(generic_ctx)
             plat_ctx = torch.zeros_like(plat_ctx)
         elif prompt_mode == 'platform':
+            generic_ctx = torch.zeros_like(generic_ctx)
             modal_ctx = torch.zeros_like(modal_ctx)
+        elif prompt_mode == 'generic':
+            modal_ctx = torch.zeros_like(modal_ctx)
+            plat_ctx = torch.zeros_like(plat_ctx)
         elif prompt_mode != 'full':
             raise ValueError(f"Unsupported prompt_mode: {prompt_mode}")
 

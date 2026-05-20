@@ -23,7 +23,8 @@ def do_train_stage2(cfg,
              log_period,
              checkpoint_period,
              eval_period,
-             stage_tag=None):
+             stage_tag=None,
+             epoch_offset=0):
     instance = cfg.DATALOADER.NUM_INSTANCE
 
     device = "cuda"
@@ -43,6 +44,7 @@ def do_train_stage2(cfg,
 
     loss_meter = AverageMeter()
     acc_meter = AverageMeter()
+    id_acc_meter = AverageMeter()
 
     evaluator = R1_mAP_eval(num_query, max_rank=50, feat_norm=cfg.TEST.FEAT_NORM)
     scaler = torch.amp.GradScaler()
@@ -73,9 +75,11 @@ def do_train_stage2(cfg,
         start_time = time.time()
         loss_meter.reset()
         acc_meter.reset()
+        id_acc_meter.reset()
         evaluator.reset()
 
-        scheduler.step(epoch)
+        global_epoch = epoch + epoch_offset
+        scheduler.step(global_epoch)
 
         model.train()
         for n_iter, (img, vid, target_cam, target_view) in enumerate(train_loader_stage2):
@@ -131,17 +135,23 @@ def do_train_stage2(cfg,
                 scaler.step(optimizer_center)
                 scaler.update()
 
+            if isinstance(score, (list, tuple)):
+                id_logits = score[0]
+            else:
+                id_logits = score
+            id_acc = (id_logits.max(1)[1] == target).float().mean()
             acc = (logits_i2t.max(1)[1] == target).float().mean()
 
             loss_meter.update(loss.item(), img.shape[0])
             acc_meter.update(acc, 1)
+            id_acc_meter.update(id_acc, 1)
 
             torch.cuda.synchronize()
             if (n_iter + 1) % log_period == 0:
                 current_lr = optimizer.param_groups[0]['lr']
-                log_msg = "Epoch[{}] Iteration[{}/{}] Loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}" \
-                          .format(epoch, (n_iter + 1), len(train_loader_stage2),
-                                  loss_meter.avg, acc_meter.avg, current_lr)
+                log_msg = "Epoch[{}] Iteration[{}/{}] Loss: {:.3f}, IDAcc: {:.3f}, I2TAcc: {:.3f}, Base Lr: {:.2e}" \
+                          .format(global_epoch, (n_iter + 1), len(train_loader_stage2),
+                                  loss_meter.avg, id_acc_meter.avg, acc_meter.avg, current_lr)
                 logger.info(log_msg)
 
         end_time = time.time()
@@ -150,10 +160,10 @@ def do_train_stage2(cfg,
             pass
         else:
             logger.info("Epoch {} done. Time per batch: {:.3f}[s] Speed: {:.1f}[samples/s]"
-                    .format(epoch, time_per_batch, train_loader_stage2.batch_size / time_per_batch))
+                    .format(global_epoch, time_per_batch, train_loader_stage2.batch_size / time_per_batch))
 
         if epoch % checkpoint_period == 0:
-            suffix = '_{}_{}.pth'.format(stage_tag, epoch) if stage_tag else '_{}.pth'.format(epoch)
+            suffix = '_{}_{}.pth'.format(stage_tag, global_epoch) if stage_tag else '_{}.pth'.format(global_epoch)
             if cfg.MODEL.DIST_TRAIN:
                 if dist.get_rank() == 0:
                     torch.save(model.state_dict(),
@@ -180,7 +190,7 @@ def do_train_stage2(cfg,
                             feat = model(img, cam_label=camids, view_label=target_view)
                             evaluator.update((feat, pid, camid))
                     cmc, mAP, _, _, _, _, _ = evaluator.compute()
-                    logger.info("Validation Results - Epoch: {}".format(epoch))
+                    logger.info("Validation Results - Epoch: {}".format(global_epoch))
                     logger.info("mAP: {:.1%}".format(mAP))
                     for r in [1, 5, 10]:
                         logger.info("CMC curve, Rank-{:<3}:{:.1%}".format(r, cmc[r - 1]))
@@ -201,7 +211,7 @@ def do_train_stage2(cfg,
                         feat = model(x=img, cam_label=camids, view_label=target_view)
                         evaluator.update((feat, pid, camid))
                 cmc, mAP, _, _, _, _, _ = evaluator.compute()
-                logger.info("Validation Results - Epoch: {}".format(epoch))
+                logger.info("Validation Results - Epoch: {}".format(global_epoch))
                 logger.info("mAP: {:.1%}".format(mAP))
                 for r in [1, 5, 10]:
                     logger.info("CMC curve, Rank-{:<3}:{:.1%}".format(r, cmc[r - 1]))
