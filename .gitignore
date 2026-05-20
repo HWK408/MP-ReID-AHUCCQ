@@ -7,7 +7,6 @@ __pycache__/
 *.pth
 *.ckpt
 runs/
-log/
 wandb/
 
 # 忽略数据集和环境变量
